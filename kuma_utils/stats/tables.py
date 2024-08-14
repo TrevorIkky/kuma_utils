@@ -1,6 +1,5 @@
 import numpy as np
 import pandas as pd
-pd.set_option("future.no_silent_downcasting", True)
 from sklearn.preprocessing import LabelEncoder
 import scipy
 from kuma_utils.preprocessing.utils import analyze_column
