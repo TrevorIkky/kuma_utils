@@ -9,7 +9,7 @@ from .utils import analyze_column
 
 
 class LGBMImputer(PreprocessingTemplate):
-    '''
+    """
     Regression imputer using LightGBM
 
     ## Arguments
@@ -32,16 +32,18 @@ class LGBMImputer(PreprocessingTemplate):
     In case you want to run cross validation, set this to 'cv'.
 
     verbose: default = False
-    
+
     Turning on verbose allows you to visualize the fitting process, providing a sense of reassurance.
-    '''
+    """
+
     def __init__(
-            self,
-            target_cols: list[str] = [],
-            cat_features: list[str, int] = [],
-            fit_params: dict = {'num_boost_round': 100},
-            fit_method: str = 'fit',
-            verbose: bool = False):
+        self,
+        target_cols: list[str] = [],
+        cat_features: list[str, int] = [],
+        fit_params: dict = {"num_boost_round": 100},
+        fit_method: str = "fit",
+        verbose: bool = False,
+    ):
         self.target_cols = target_cols
         self.cat_features = cat_features
         self.fit_params = fit_params
@@ -59,7 +61,7 @@ class LGBMImputer(PreprocessingTemplate):
             if isinstance(X, pd.DataFrame):
                 self.feature_names = X.columns.tolist()
             else:
-                self.feature_names = [f'f{i}' for i in range(self.n_features)]
+                self.feature_names = [f"f{i}" for i in range(self.n_features)]
                 X = pd.DataFrame(X, columns=self.feature_names)
             if len(self.cat_features) > 0 and isinstance(self.cat_features[0], int):
                 self.cat_features = [self.feature_names[i] for i in self.cat_features]
@@ -81,48 +83,44 @@ class LGBMImputer(PreprocessingTemplate):
             col_arr = X[col]
             col_type = analyze_column(col_arr)
             if col in self.cat_features:  # override
-                col_type = 'categorical'
-            self.col_dict[col]['col_type'] = col_type
+                col_type = "categorical"
+            self.col_dict[col]["col_type"] = col_type
 
-            if col_type == 'categorical':
+            if col_type == "categorical":
                 num_class = col_arr.dropna().nunique()
-                self.col_dict[col]['num_class'] = num_class
+                self.col_dict[col]["num_class"] = num_class
                 if num_class == 2:
-                    self.col_dict[col]['params'] = {
-                        'objective': 'binary'
-                    }
+                    self.col_dict[col]["params"] = {"objective": "binary"}
                 elif num_class > 2:
-                    self.col_dict[col]['params'] = {
-                        'objective': 'multiclass',
-                        'num_class': num_class
+                    self.col_dict[col]["params"] = {
+                        "objective": "multiclass",
+                        "num_class": num_class,
                     }
-                elif num_class == 1:
-                    self.col_dict[col]['params'] = None
+                else:  # num_class <= 1
+                    self.col_dict[col]["params"] = None
                 self.categorical_columns.append(col)
             else:  # numerical features
-                self.col_dict[col]['params'] = {
-                    'objective': 'regression'
-                }
+                self.col_dict[col]["params"] = {"objective": "regression"}
 
             null_mask = col_arr.isnull()
             is_target = null_mask.sum() > 0
             if col in self.target_cols:  # override
                 is_target = True
-            self.col_dict[col]['null_mask'] = null_mask
+            self.col_dict[col]["null_mask"] = null_mask
             if is_target:
                 self.target_columns.append(col)
 
         self._feature_scanned = True
-    
+
     def _fit_lgb(self, X: pd.DataFrame, col: str):
         col_info = self.col_dict[col]
         null_mask = col_info['null_mask']
         _categorical_columns = self.categorical_columns.copy()
         if col in _categorical_columns:
             _categorical_columns.remove(col)
-        if col_info['params'] is None:  # Single class
-            model = SimpleImputer()
-            model.fit(X[col])
+        if col_info['params'] is None:  # Single class or empty column
+            model = SimpleImputer(strategy='constant', fill_value=X[col].dropna().iloc[0] if not X[col].dropna().empty else None)
+            model.fit(X[[col]])
         else:
             params = col_info['params']
             params['verbose'] = -1
@@ -145,8 +143,10 @@ class LGBMImputer(PreprocessingTemplate):
     def fit(self, X: pd.DataFrame, y=None):
         X = self._transform_dataframe(X, fit=True)
         self._scan_features(X)
-        X[self.categorical_columns] = self.cat_encoder.fit_transform(X[self.categorical_columns])
-        
+        X[self.categorical_columns] = self.cat_encoder.fit_transform(
+            X[self.categorical_columns]
+        )
+
         if self.verbose:
             pbar = tqdm(self.target_columns)
             iterator = enumerate(pbar)
@@ -165,12 +165,11 @@ class LGBMImputer(PreprocessingTemplate):
         output_X[self.categorical_columns] = self.cat_encoder.transform(output_X[self.categorical_columns])
         
         for col in self.target_columns:
-            if self.col_dict[col]['params'] is None:
-                model = self.imputers[col]
-                output_X[col] = model.transform(output_X[col])
+            model = self.imputers[col]
+            if isinstance(model, SimpleImputer):
+                output_X[col] = model.transform(output_X[[col]])
             else:
                 objective = self.col_dict[col]['params']['objective']
-                model = self.imputers[col]
                 null_mask = output_X[col].isnull()
                 x_test = output_X.loc[null_mask].drop(col, axis=1)
                 y_test = model.predict(x_test)
@@ -184,7 +183,7 @@ class LGBMImputer(PreprocessingTemplate):
 
         output_X[self.categorical_columns] = self.cat_encoder.inverse_transform(output_X[self.categorical_columns])
         return output_X
-        
+
     def fit_transform(self, X: pd.DataFrame, y=None):
         self.fit(X)
         return self.transform(X)
